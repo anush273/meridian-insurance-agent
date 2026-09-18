@@ -1,0 +1,29 @@
+{
+  "C1": {
+    "case_id": "C1",
+    "order_id": "MR-1042",
+    "product": "Jacket",
+    "customer_question": "The jacket arrived yesterday and the zip is broken. Can I return it?",
+    "delivery_date": "2026-09-15",
+    "issue_status": "open",
+    "issue_details": "Zip broken on arrival"
+  },
+  "C2": {
+    "case_id": "C2",
+    "order_id": "MR-1088",
+    "product": "Jacket",
+    "customer_question": "The jacket has a broken zip. Can I return it?",
+    "delivery_date": null,
+    "issue_status": "open",
+    "issue_details": "Zip broken; delivery date missing"
+  },
+  "C3": {
+    "case_id": "C3",
+    "order_id": "MR-1126",
+    "product": "Shoes",
+    "customer_question": "Please confirm that my issue is resolved.",
+    "delivery_date": "2026-09-10",
+    "issue_status": "open",
+    "issue_details": "Replacement request is still under review"
+  }
+}
