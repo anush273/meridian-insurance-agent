@@ -1,45 +1,43 @@
 import setup_env
 
 
-def test_write_env_file_contains_key_and_model(tmp_path):
+def test_write_env_file_contains_host_and_model(tmp_path):
     env_path = tmp_path / ".env"
-    setup_env.write_env_file(env_path, "sk-real-key", "claude-haiku-4-5-20251001")
+    setup_env.write_env_file(env_path, "http://localhost:11434", "llama3.2")
 
     content = env_path.read_text()
-    assert "APP_ANTHROPIC_API_KEY=sk-real-key" in content
-    assert "APP_ANTHROPIC_MODEL=claude-haiku-4-5-20251001" in content
+    assert "APP_OLLAMA_HOST=http://localhost:11434" in content
+    assert "APP_OLLAMA_MODEL=llama3.2" in content
 
 
-def test_prompt_api_key_strips_whitespace_and_uses_hidden_reader():
-    calls = []
+def test_prompt_host_returns_default_on_blank_input():
+    host = setup_env.prompt_host(reader=lambda prompt: "", default="http://localhost:11434")
+    assert host == "http://localhost:11434"
 
-    def fake_hidden_reader(prompt):
-        calls.append(prompt)
-        return "  sk-hidden-key  \n"
 
-    key = setup_env.prompt_api_key(reader=fake_hidden_reader)
-
-    assert key == "sk-hidden-key"
-    assert len(calls) == 1
+def test_prompt_host_returns_typed_value():
+    host = setup_env.prompt_host(
+        reader=lambda prompt: "http://remote-host:11434", default="http://localhost:11434"
+    )
+    assert host == "http://remote-host:11434"
 
 
 def test_prompt_model_returns_default_on_blank_input():
-    model = setup_env.prompt_model(reader=lambda prompt: "", default="claude-haiku-4-5-20251001")
-    assert model == "claude-haiku-4-5-20251001"
+    model = setup_env.prompt_model(reader=lambda prompt: "", default="llama3.2")
+    assert model == "llama3.2"
 
 
 def test_prompt_model_returns_typed_value():
-    model = setup_env.prompt_model(reader=lambda prompt: "custom-model-id", default="claude-haiku-4-5-20251001")
+    model = setup_env.prompt_model(reader=lambda prompt: "custom-model-id", default="llama3.2")
     assert model == "custom-model-id"
 
 
-def test_main_writes_key_to_env_file_without_printing_it(tmp_path, capsys):
+def test_main_writes_host_and_model_to_env_file(tmp_path, capsys):
     env_path = tmp_path / ".env"
-    secret_key = "sk-super-secret-value"
 
     exit_code = setup_env.main(
         env_path=env_path,
-        api_key_reader=lambda prompt: secret_key,
+        host_reader=lambda prompt: "",
         model_reader=lambda prompt: "",
     )
 
@@ -47,21 +45,21 @@ def test_main_writes_key_to_env_file_without_printing_it(tmp_path, capsys):
 
     assert exit_code == 0
     assert env_path.read_text() == (
-        f"APP_ANTHROPIC_API_KEY={secret_key}\n"
-        f"APP_ANTHROPIC_MODEL={setup_env.DEFAULT_MODEL}\n"
+        f"APP_OLLAMA_HOST={setup_env.DEFAULT_HOST}\n"
+        f"APP_OLLAMA_MODEL={setup_env.DEFAULT_MODEL}\n"
     )
-    assert secret_key not in captured.out
-    assert secret_key not in captured.err
+    assert setup_env.DEFAULT_MODEL in captured.out
 
 
-def test_main_aborts_without_writing_file_when_no_key_entered(tmp_path, capsys):
+def test_main_respects_typed_overrides(tmp_path):
     env_path = tmp_path / ".env"
 
-    exit_code = setup_env.main(
+    setup_env.main(
         env_path=env_path,
-        api_key_reader=lambda prompt: "",
-        model_reader=lambda prompt: "",
+        host_reader=lambda prompt: "http://gpu-box:11434",
+        model_reader=lambda prompt: "qwen2.5:7b",
     )
 
-    assert exit_code == 1
-    assert not env_path.exists()
+    content = env_path.read_text()
+    assert "APP_OLLAMA_HOST=http://gpu-box:11434" in content
+    assert "APP_OLLAMA_MODEL=qwen2.5:7b" in content

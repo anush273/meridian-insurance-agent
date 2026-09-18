@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from ollama import Client
 
 import app
 
@@ -205,9 +206,7 @@ def test_is_delivery_date_missing_false_when_present():
     assert app.is_delivery_date_missing({"delivery_date": "2026-09-15"}) is False
 
 
-def test_resolve_result_calls_model_when_delivery_date_present(monkeypatch):
-    monkeypatch.setenv("APP_ANTHROPIC_API_KEY", "test-key")
-
+def test_resolve_result_calls_model_when_delivery_date_present():
     def fake_model(client, model_id, policy_text, case):
         return VALID_MODEL_JSON
 
@@ -260,35 +259,43 @@ def test_unavailable_result_shape():
     assert result["review_status"] == "UNAVAILABLE"
 
 
-# --- client construction / env var isolation -------------------------------
+# --- client construction / env vars -----------------------------------------
 
-def test_get_client_raises_without_app_key(monkeypatch):
-    monkeypatch.delenv("APP_ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(RuntimeError):
-        app.get_client()
-
-
-def test_get_client_ignores_global_anthropic_api_key(monkeypatch):
-    monkeypatch.delenv("APP_ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "should-not-be-used")
-    with pytest.raises(RuntimeError):
-        app.get_client()
+def test_get_ollama_host_defaults(monkeypatch):
+    monkeypatch.delenv("APP_OLLAMA_HOST", raising=False)
+    assert app.get_ollama_host() == app.DEFAULT_OLLAMA_HOST
 
 
-def test_get_client_uses_app_key(monkeypatch):
-    monkeypatch.setenv("APP_ANTHROPIC_API_KEY", "test-key-123")
-    client = app.get_client()
-    assert client.api_key == "test-key-123"
+def test_get_ollama_host_reads_env_override(monkeypatch):
+    monkeypatch.setenv("APP_OLLAMA_HOST", "http://example.local:11434")
+    assert app.get_ollama_host() == "http://example.local:11434"
 
 
 def test_get_model_id_defaults(monkeypatch):
-    monkeypatch.delenv("APP_ANTHROPIC_MODEL", raising=False)
+    monkeypatch.delenv("APP_OLLAMA_MODEL", raising=False)
     assert app.get_model_id() == app.DEFAULT_MODEL
 
 
 def test_get_model_id_reads_env_override(monkeypatch):
-    monkeypatch.setenv("APP_ANTHROPIC_MODEL", "some-other-model")
+    monkeypatch.setenv("APP_OLLAMA_MODEL", "some-other-model")
     assert app.get_model_id() == "some-other-model"
+
+
+def test_get_client_returns_client_without_requiring_any_config(monkeypatch):
+    monkeypatch.delenv("APP_OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("APP_OLLAMA_MODEL", raising=False)
+    client = app.get_client()
+    assert isinstance(client, Client)
+
+
+def test_call_model_extracts_content_from_chat_response():
+    class FakeClient:
+        def chat(self, **kwargs):
+            assert kwargs["format"] == "json"
+            return {"message": {"role": "assistant", "content": VALID_MODEL_JSON}}
+
+    result = app.call_model(FakeClient(), "fake-model", "policy text", VALID_CASE)
+    assert result == VALID_MODEL_JSON
 
 
 # --- CLI-level behaviour ----------------------------------------------------

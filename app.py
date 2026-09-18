@@ -16,15 +16,16 @@ import json
 import os
 from pathlib import Path
 
-from anthropic import Anthropic
 from dotenv import load_dotenv
+from ollama import Client
 
 BASE_DIR = Path(__file__).resolve().parent
 POLICY_PATH = BASE_DIR / "policy.md"
 CASES_PATH = BASE_DIR / "cases.json"
 DEMO_OUTPUTS_PATH = BASE_DIR / "demo_outputs.json"
 
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_MODEL = "llama3.2"
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 VALID_CASES = ("C1", "C2", "C3")
 VALID_REVIEW_STATUSES = {"READY_FOR_HUMAN_REVIEW", "NEEDS_INFORMATION", "BLOCKED"}
 UNAVAILABLE_STATUS = "UNAVAILABLE"
@@ -100,25 +101,23 @@ def build_messages(case):
     return [{"role": "user", "content": user_content}]
 
 
+def get_ollama_host():
+    return os.environ.get("APP_OLLAMA_HOST", DEFAULT_OLLAMA_HOST)
+
+
 def get_client():
-    api_key = os.environ.get("APP_ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("APP_ANTHROPIC_API_KEY is not set.")
-    return Anthropic(api_key=api_key, timeout=20.0, max_retries=0)
+    return Client(host=get_ollama_host(), timeout=20.0)
 
 
 def get_model_id():
-    return os.environ.get("APP_ANTHROPIC_MODEL", DEFAULT_MODEL)
+    return os.environ.get("APP_OLLAMA_MODEL", DEFAULT_MODEL)
 
 
 def call_model(client, model_id, policy_text, case):
-    response = client.messages.create(
-        model=model_id,
-        max_tokens=400,
-        system=build_system_prompt(policy_text),
-        messages=build_messages(case),
-    )
-    return response.content[0].text
+    messages = [{"role": "system", "content": build_system_prompt(policy_text)}]
+    messages.extend(build_messages(case))
+    response = client.chat(model=model_id, messages=messages, format="json")
+    return response["message"]["content"]
 
 
 def parse_and_validate_model_output(raw_text):
@@ -204,11 +203,7 @@ def resolve_result(case, policy_text, model_fn=call_model):
     if is_delivery_date_missing(case):
         return missing_delivery_date_result(), []
 
-    try:
-        client = get_client()
-    except RuntimeError as exc:
-        return unavailable_result(), [f"CONFIGURATION ERROR: {exc}", MANUAL_FALLBACK_MESSAGE]
-
+    client = get_client()
     model_id = get_model_id()
     result, error = get_online_result(client, model_id, policy_text, case, model_fn=model_fn)
     if error:

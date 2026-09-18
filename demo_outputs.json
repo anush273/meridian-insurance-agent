@@ -1,7 +1,7 @@
 {
   "_meta": {
     "source": "prerecorded_synthetic",
-    "note": "Hand-authored example results for --offline-demo. No model API was used to produce these; they exist so the classroom demo works without a live API key."
+    "note": "Hand-authored example results for --offline-demo. No model API was used to produce these; they exist so the classroom demo works without a running local model."
   },
   "C1": {
     "draft_reply": "Thanks for letting us know about the broken zip on your jacket (order MR-1042), delivered on 2026-09-15. Since this was reported within two days of delivery, this case is being referred to our returns team for human review. This does not mean a refund has been approved -- a team member will confirm next steps with you directly.",
