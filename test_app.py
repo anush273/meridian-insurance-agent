@@ -2,6 +2,7 @@ import json
 
 import pytest
 from ollama import Client
+from openai import OpenAI
 
 import app
 
@@ -259,7 +260,25 @@ def test_unavailable_result_shape():
     assert result["review_status"] == "UNAVAILABLE"
 
 
-# --- client construction / env vars -----------------------------------------
+# --- backend selection -------------------------------------------------------
+
+def test_get_backend_defaults_to_ollama(monkeypatch):
+    monkeypatch.delenv("APP_MODEL_BACKEND", raising=False)
+    assert app.get_backend() == "ollama"
+
+
+def test_get_backend_reads_env_override(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "OpenRouter")
+    assert app.get_backend() == "openrouter"
+
+
+def test_get_backend_rejects_unknown_value(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "not-a-real-backend")
+    with pytest.raises(RuntimeError):
+        app.get_backend()
+
+
+# --- ollama backend -----------------------------------------------------------
 
 def test_get_ollama_host_defaults(monkeypatch):
     monkeypatch.delenv("APP_OLLAMA_HOST", raising=False)
@@ -271,24 +290,29 @@ def test_get_ollama_host_reads_env_override(monkeypatch):
     assert app.get_ollama_host() == "http://example.local:11434"
 
 
-def test_get_model_id_defaults(monkeypatch):
+def test_get_model_id_defaults_for_ollama(monkeypatch):
+    monkeypatch.delenv("APP_MODEL_BACKEND", raising=False)
     monkeypatch.delenv("APP_OLLAMA_MODEL", raising=False)
-    assert app.get_model_id() == app.DEFAULT_MODEL
+    assert app.get_model_id() == app.DEFAULT_OLLAMA_MODEL
 
 
-def test_get_model_id_reads_env_override(monkeypatch):
+def test_get_model_id_reads_env_override_for_ollama(monkeypatch):
+    monkeypatch.delenv("APP_MODEL_BACKEND", raising=False)
     monkeypatch.setenv("APP_OLLAMA_MODEL", "some-other-model")
     assert app.get_model_id() == "some-other-model"
 
 
-def test_get_client_returns_client_without_requiring_any_config(monkeypatch):
+def test_get_client_returns_ollama_client_without_requiring_any_config(monkeypatch):
+    monkeypatch.delenv("APP_MODEL_BACKEND", raising=False)
     monkeypatch.delenv("APP_OLLAMA_HOST", raising=False)
     monkeypatch.delenv("APP_OLLAMA_MODEL", raising=False)
     client = app.get_client()
     assert isinstance(client, Client)
 
 
-def test_call_model_extracts_content_from_chat_response():
+def test_call_model_dispatches_to_ollama_by_default(monkeypatch):
+    monkeypatch.delenv("APP_MODEL_BACKEND", raising=False)
+
     class FakeClient:
         def chat(self, **kwargs):
             assert kwargs["format"] == "json"
@@ -296,6 +320,75 @@ def test_call_model_extracts_content_from_chat_response():
 
     result = app.call_model(FakeClient(), "fake-model", "policy text", VALID_CASE)
     assert result == VALID_MODEL_JSON
+
+
+# --- openrouter backend ---------------------------------------------------
+
+def test_get_client_raises_without_openrouter_api_key(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "openrouter")
+    monkeypatch.delenv("APP_OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        app.get_client()
+
+
+def test_get_client_returns_openrouter_client_with_key(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "openrouter")
+    monkeypatch.setenv("APP_OPENROUTER_API_KEY", "sk-or-test-key")
+    client = app.get_client()
+    assert isinstance(client, OpenAI)
+
+
+def test_get_model_id_raises_without_openrouter_model(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "openrouter")
+    monkeypatch.delenv("APP_OPENROUTER_MODEL", raising=False)
+    with pytest.raises(RuntimeError):
+        app.get_model_id()
+
+
+def test_get_model_id_reads_openrouter_model(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "openrouter")
+    monkeypatch.setenv("APP_OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+    assert app.get_model_id() == "meta-llama/llama-3.1-8b-instruct:free"
+
+
+def test_call_model_dispatches_to_openrouter(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "openrouter")
+
+    class FakeMessage:
+        content = VALID_MODEL_JSON
+
+    class FakeChoice:
+        message = FakeMessage()
+
+    class FakeCompletionResponse:
+        choices = [FakeChoice()]
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            assert kwargs["response_format"] == {"type": "json_object"}
+            return FakeCompletionResponse()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+    result = app.call_model(FakeClient(), "fake-model", "policy text", VALID_CASE)
+    assert result == VALID_MODEL_JSON
+
+
+def test_resolve_result_configuration_error_when_openrouter_key_missing(monkeypatch):
+    monkeypatch.setenv("APP_MODEL_BACKEND", "openrouter")
+    monkeypatch.delenv("APP_OPENROUTER_API_KEY", raising=False)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("model should not be called when config is invalid")
+
+    result, notes = app.resolve_result(VALID_CASE, "policy text", model_fn=fail_if_called)
+
+    assert result == app.unavailable_result()
+    assert any("CONFIGURATION ERROR" in note for note in notes)
 
 
 # --- CLI-level behaviour ----------------------------------------------------

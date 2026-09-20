@@ -9,6 +9,9 @@ Drafts a customer support reply for one case, using only the facts in
 cases.json and the rules in policy.md, and prints it for a human reviewer.
 This tool only prints text. It never sends a message, approves a refund, or
 changes a record — a human must act on the draft.
+
+Model backend is chosen via APP_MODEL_BACKEND ("ollama", the default, or
+"openrouter"). See .env.example for the variables each backend needs.
 """
 
 import argparse
@@ -18,14 +21,18 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from ollama import Client
+from openai import OpenAI
 
 BASE_DIR = Path(__file__).resolve().parent
 POLICY_PATH = BASE_DIR / "policy.md"
 CASES_PATH = BASE_DIR / "cases.json"
 DEMO_OUTPUTS_PATH = BASE_DIR / "demo_outputs.json"
 
-DEFAULT_MODEL = "llama3.2"
+DEFAULT_BACKEND = "ollama"
+VALID_BACKENDS = ("ollama", "openrouter")
+DEFAULT_OLLAMA_MODEL = "llama3.2"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 VALID_CASES = ("C1", "C2", "C3")
 VALID_REVIEW_STATUSES = {"READY_FOR_HUMAN_REVIEW", "NEEDS_INFORMATION", "BLOCKED"}
 UNAVAILABLE_STATUS = "UNAVAILABLE"
@@ -101,23 +108,63 @@ def build_messages(case):
     return [{"role": "user", "content": user_content}]
 
 
+def get_backend():
+    backend = os.environ.get("APP_MODEL_BACKEND", DEFAULT_BACKEND).strip().lower()
+    if backend not in VALID_BACKENDS:
+        raise RuntimeError(f"APP_MODEL_BACKEND must be one of {VALID_BACKENDS}, got '{backend}'")
+    return backend
+
+
 def get_ollama_host():
     return os.environ.get("APP_OLLAMA_HOST", DEFAULT_OLLAMA_HOST)
 
 
 def get_client():
+    if get_backend() == "openrouter":
+        api_key = os.environ.get("APP_OPENROUTER_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("APP_OPENROUTER_API_KEY is not set.")
+        return OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key, timeout=20.0, max_retries=0)
     return Client(host=get_ollama_host(), timeout=20.0)
 
 
 def get_model_id():
-    return os.environ.get("APP_OLLAMA_MODEL", DEFAULT_MODEL)
+    if get_backend() == "openrouter":
+        model_id = os.environ.get("APP_OPENROUTER_MODEL", "").strip()
+        if not model_id:
+            raise RuntimeError("APP_OPENROUTER_MODEL is not set.")
+        return model_id
+    return os.environ.get("APP_OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
 
 
-def call_model(client, model_id, policy_text, case):
+def _call_ollama(client, model_id, policy_text, case):
     messages = [{"role": "system", "content": build_system_prompt(policy_text)}]
     messages.extend(build_messages(case))
     response = client.chat(model=model_id, messages=messages, format="json")
     return response["message"]["content"]
+
+
+def _call_openrouter(client, model_id, policy_text, case):
+    messages = [{"role": "system", "content": build_system_prompt(policy_text)}]
+    messages.extend(build_messages(case))
+    response = client.chat.completions.create(
+        model=model_id,
+        # Generous budget: some free OpenRouter models are "reasoning"
+        # models that spend most of their tokens on a hidden chain of
+        # thought before writing the final JSON answer. A tight limit
+        # truncates them before they ever emit content (see finish_reason
+        # "length" -> content=None).
+        max_tokens=2000,
+        response_format={"type": "json_object"},
+        messages=messages,
+    )
+    return response.choices[0].message.content
+
+
+def call_model(client, model_id, policy_text, case):
+    if get_backend() == "openrouter":
+        return _call_openrouter(client, model_id, policy_text, case)
+    return _call_ollama(client, model_id, policy_text, case)
 
 
 def parse_and_validate_model_output(raw_text):
@@ -203,8 +250,12 @@ def resolve_result(case, policy_text, model_fn=call_model):
     if is_delivery_date_missing(case):
         return missing_delivery_date_result(), []
 
-    client = get_client()
-    model_id = get_model_id()
+    try:
+        client = get_client()
+        model_id = get_model_id()
+    except RuntimeError as exc:
+        return unavailable_result(), [f"CONFIGURATION ERROR: {exc}", MANUAL_FALLBACK_MESSAGE]
+
     result, error = get_online_result(client, model_id, policy_text, case, model_fn=model_fn)
     if error:
         return result, [f"MODEL UNAVAILABLE: {error}", MANUAL_FALLBACK_MESSAGE]

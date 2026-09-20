@@ -1,3 +1,4 @@
 ollama==0.6.2
+openai==3.16.2
 python-dotenv==1.2.3
 pytest==9.1.1
