@@ -11,6 +11,50 @@ This tool **only prints text**. It never sends messages, approves refunds,
 or changes any records (policy P4). A person must review every draft
 before acting on it.
 
+## Why this exists
+
+This is a teaching example, not a production tool. It exists to
+demonstrate one idea concretely: **an LLM should draft, a human should
+decide** — and to show, with evidence rather than theory, why that
+boundary has to be enforced in the code, not just assumed.
+
+The scenario (a small retailer, three support cases, a four-rule policy)
+is deliberately simple so the interesting part isn't the business logic —
+it's the guardrails around the model:
+
+- **Structural validation is not correctness validation.** The tool
+  checks that a model's JSON reply has the right shape (right keys, right
+  types, an allowed `review_status`) before it's ever displayed. That
+  catches malformed output, but it can't catch a model that's confidently
+  wrong — like claiming a delivery date is missing when it's sitting
+  right there in the supplied facts. Both failure modes showed up
+  repeatedly while building this, across three different backends and
+  several different models, which is why "structurally valid" and
+  "actually correct" are treated as two separate questions here.
+- **Known answers shouldn't be delegated to a probabilistic model.**
+  Whether `delivery_date` is present is a fact an `if` statement can
+  check, so `resolve_result()` does exactly that and skips the model
+  call entirely for that case. Every model call the tool does make is one
+  the policy genuinely requires judgment for.
+- **Every failure mode degrades to the same safe, visible state.** A
+  missing API key, an unreachable local server, a rate limit, a timeout,
+  or a malformed response all end up in the same place: an empty draft,
+  `review_status: UNAVAILABLE`, and an explicit instruction for a human
+  to draft manually. Nothing partial, stale, or guessed-at is ever shown.
+- **The model backend is a swappable detail, not the architecture.**
+  This tool has run against Anthropic's API, a local Ollama model, and
+  several free OpenRouter models over the course of building it, and the
+  safety properties above hold regardless of which one is plugged in,
+  because they live in the app's logic, not in trusting any particular
+  model's behavior.
+
+If this project has one real finding, it's empirical: even models that
+pass every structural check still get simple, checkable facts wrong often
+enough that unsupervised drafting would be unsafe here. That's not a
+verdict on any specific model — it's the reason this tool is built the
+way it is, and the reason a clean `review_status` is a starting point for
+a human reviewer, never an approval.
+
 ## Files
 
 - `policy.md` — the drafting policy the model must follow.
@@ -107,6 +151,27 @@ default `ollama`).
 - OpenRouter: `APP_OPENROUTER_API_KEY` (required, no default),
   `APP_OPENROUTER_MODEL` (required, no default — pick a current free
   model id).
+
+## Known behavior and limitations
+
+- **No retries.** Each model call is a single attempt (`timeout=20.0`,
+  `max_retries=0` on both backends). A transient failure — a timeout, a
+  429, or even an occasional malformed 200 response from a provider —
+  fails that run straight to the safe unavailable state rather than
+  retrying automatically. Just run the command again.
+- **Small/free models are not reliably correct.** Structural validation
+  (`parse_and_validate_model_output`) only checks the JSON *shape* is
+  right — it cannot check the *content* is right. In testing, smaller
+  local models (`llama3.2`, `qwen2.5:7b`) and even some free OpenRouter
+  models have inconsistently asked for `delivery_date` or claimed it was
+  missing even when it was clearly present in `SUPPLIED FACTS`, on the
+  same case, across different runs. This is exactly why every draft is
+  labelled for human review rather than auto-sent — treat a clean
+  `review_status` as a starting point, not a guarantee.
+- **OpenRouter's free tier changes over time.** Free models get added,
+  removed, and rate-limited without notice. If `APP_OPENROUTER_MODEL`
+  starts failing, check [openrouter.ai/models?max_price=0](https://openrouter.ai/models?max_price=0)
+  for a current alternative and update `.env`.
 
 ## Testing
 

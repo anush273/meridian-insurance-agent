@@ -20,24 +20,33 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from ollama import Client
-from openai import OpenAI
+from ollama import Client       # local model backend
+from openai import OpenAI       # OpenRouter backend (OpenAI-compatible API)
 
+# Project files are always found relative to this file, not the caller's
+# working directory, so the app can be run from anywhere.
 BASE_DIR = Path(__file__).resolve().parent
 POLICY_PATH = BASE_DIR / "policy.md"
 CASES_PATH = BASE_DIR / "cases.json"
 DEMO_OUTPUTS_PATH = BASE_DIR / "demo_outputs.json"
 
+# --- backend configuration defaults -----------------------------------------
 DEFAULT_BACKEND = "ollama"
 VALID_BACKENDS = ("ollama", "openrouter")
 DEFAULT_OLLAMA_MODEL = "llama3.2"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
 VALID_CASES = ("C1", "C2", "C3")
+# The only three statuses a real model response is allowed to use.
+# UNAVAILABLE (below) is a separate, app-generated status for failures.
 VALID_REVIEW_STATUSES = {"READY_FOR_HUMAN_REVIEW", "NEEDS_INFORMATION", "BLOCKED"}
 UNAVAILABLE_STATUS = "UNAVAILABLE"
+# The model's JSON response must contain exactly these keys, no more, no less.
 REQUIRED_RESULT_KEYS = {"draft_reply", "evidence_refs", "missing_information", "review_status"}
 
+# Shown whenever the app can't produce a real draft (config error, provider
+# error, timeout, bad output) so the human reviewer knows what to do next.
 MANUAL_FALLBACK_MESSAGE = (
     "Model output unavailable. A human agent must draft this reply manually "
     "using the SUPPLIED FACTS and SUPPLIED POLICY above before responding to "
@@ -45,6 +54,7 @@ MANUAL_FALLBACK_MESSAGE = (
     "and no record has been changed."
 )
 
+# Load .env once at import time so every env var lookup below just works.
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -53,25 +63,30 @@ class ModelOutputError(Exception):
 
 
 def load_policy(path=POLICY_PATH):
+    # Read the policy markdown as plain text; it's injected into the prompt as-is.
     with open(path, "r") as f:
         return f.read()
 
 
 def load_cases(path=CASES_PATH):
+    # cases.json is a single object keyed by case id (C1, C2, C3).
     with open(path, "r") as f:
         return json.load(f)
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Draft a Meridian Retail support reply for human review.")
-    parser.add_argument("--case", required=True, choices=VALID_CASES)
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument("--simulate-timeout", action="store_true")
-    mode_group.add_argument("--offline-demo", action="store_true")
+    parser.add_argument("--case", required=True, choices=VALID_CASES)  # which case to draft for
+    mode_group = parser.add_mutually_exclusive_group()  # at most one of these two special modes
+    mode_group.add_argument("--simulate-timeout", action="store_true")  # force the safe-unavailable path, no API call
+    mode_group.add_argument("--offline-demo", action="store_true")      # replay a prerecorded result, no API call
     return parser.parse_args(argv)
 
 
 def build_system_prompt(policy_text):
+    # The system prompt carries the policy text and pins down the exact JSON
+    # shape the model must reply with. Told explicitly to use only supplied
+    # facts/policy so it can't invent details not present in the case data.
     return (
         "You are drafting a customer support reply for Meridian Retail. "
         "Use only the supplied facts and the supplied policy below. Do not "
@@ -91,6 +106,8 @@ def build_system_prompt(policy_text):
 
 
 def build_messages(case):
+    # Flatten the case dict into a plain-text block the model can read;
+    # this becomes the "SUPPLIED FACTS" the model is told to rely on.
     case_summary = (
         f"case_id: {case['case_id']}\n"
         f"order_id: {case['order_id']}\n"
@@ -109,6 +126,7 @@ def build_messages(case):
 
 
 def get_backend():
+    # APP_MODEL_BACKEND picks which client/call path the rest of the app uses.
     backend = os.environ.get("APP_MODEL_BACKEND", DEFAULT_BACKEND).strip().lower()
     if backend not in VALID_BACKENDS:
         raise RuntimeError(f"APP_MODEL_BACKEND must be one of {VALID_BACKENDS}, got '{backend}'")
@@ -120,18 +138,27 @@ def get_ollama_host():
 
 
 def get_client():
+    # Returns the right SDK client object for whichever backend is configured.
     if get_backend() == "openrouter":
         api_key = os.environ.get("APP_OPENROUTER_API_KEY", "").strip()
         if not api_key:
+            # Caught by resolve_result() and turned into a safe unavailable
+            # result — never raised all the way up to the user as a traceback.
             raise RuntimeError("APP_OPENROUTER_API_KEY is not set.")
+        # OpenRouter speaks the OpenAI API shape, so the OpenAI SDK just
+        # needs pointing at OpenRouter's base URL instead of api.openai.com.
         return OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key, timeout=20.0, max_retries=0)
+    # Ollama needs no credential — just where the local server is listening.
     return Client(host=get_ollama_host(), timeout=20.0)
 
 
 def get_model_id():
+    # Which model name to send to the client, per backend.
     if get_backend() == "openrouter":
         model_id = os.environ.get("APP_OPENROUTER_MODEL", "").strip()
         if not model_id:
+            # No sensible default here: OpenRouter's free models rotate over
+            # time, so a hardcoded default would eventually go stale/break.
             raise RuntimeError("APP_OPENROUTER_MODEL is not set.")
         return model_id
     return os.environ.get("APP_OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
@@ -140,6 +167,8 @@ def get_model_id():
 def _call_ollama(client, model_id, policy_text, case):
     messages = [{"role": "system", "content": build_system_prompt(policy_text)}]
     messages.extend(build_messages(case))
+    # format="json" asks Ollama to constrain output to syntactically valid JSON
+    # (it does NOT guarantee the *content* is correct — see parse_and_validate).
     response = client.chat(model=model_id, messages=messages, format="json")
     return response["message"]["content"]
 
@@ -155,19 +184,24 @@ def _call_openrouter(client, model_id, policy_text, case):
         # truncates them before they ever emit content (see finish_reason
         # "length" -> content=None).
         max_tokens=2000,
-        response_format={"type": "json_object"},
+        response_format={"type": "json_object"},  # OpenAI-style JSON mode
         messages=messages,
     )
     return response.choices[0].message.content
 
 
 def call_model(client, model_id, policy_text, case):
+    # Single entry point get_online_result() calls; picks the right
+    # backend-specific implementation based on current configuration.
     if get_backend() == "openrouter":
         return _call_openrouter(client, model_id, policy_text, case)
     return _call_ollama(client, model_id, policy_text, case)
 
 
 def parse_and_validate_model_output(raw_text):
+    # Structural/type validation only — this checks the JSON is *shaped*
+    # correctly, not that its content is actually correct (a model can pass
+    # every check here and still, say, claim a supplied field is missing).
     try:
         data = json.loads(raw_text)
     except (TypeError, ValueError) as exc:
@@ -176,6 +210,7 @@ def parse_and_validate_model_output(raw_text):
     if not isinstance(data, dict):
         raise ModelOutputError("response JSON was not an object")
 
+    # Exactly these four keys — no extras, none missing.
     if set(data.keys()) != REQUIRED_RESULT_KEYS:
         raise ModelOutputError(f"response had unexpected keys: {sorted(data.keys())}")
 
@@ -201,6 +236,8 @@ def parse_and_validate_model_output(raw_text):
 
 
 def unavailable_result():
+    # The one "safe" shape returned whenever a real draft can't be produced,
+    # regardless of *why* (bad config, provider error, timeout, bad JSON).
     return {
         "draft_reply": "",
         "evidence_refs": [],
@@ -216,19 +253,22 @@ def get_online_result(client, model_id, policy_text, case, model_fn=call_model):
     through, by design, so a traceback or a stale draft never reaches
     a human reviewer."""
     try:
-        raw_text = model_fn(client, model_id, policy_text, case)
+        raw_text = model_fn(client, model_id, policy_text, case)  # the only network call
         data = parse_and_validate_model_output(raw_text)
-        return data, None
+        return data, None  # (result, error) — no error on success
     except Exception as exc:  # noqa: BLE001 - intentional safety boundary, see docstring
         return unavailable_result(), str(exc)
 
 
 def is_delivery_date_missing(case):
+    # Treat both a JSON null and an empty/whitespace-only string as "missing".
     value = case.get("delivery_date")
     return value is None or (isinstance(value, str) and value.strip() == "")
 
 
 def missing_delivery_date_result():
+    # Hardcoded per policy P2: if delivery_date is missing, ask for it —
+    # this exact text is returned instead of asking the model to draft it.
     return {
         "draft_reply": (
             "Before Meridian Retail can assess whether this case falls "
@@ -247,12 +287,14 @@ def resolve_result(case, policy_text, model_fn=call_model):
     non-offline) path. Returns (result, notes). When delivery_date is
     missing, returns the deterministic P2 result without constructing a
     client or calling the model at all."""
+    # Short-circuit before touching the network at all: this case doesn't
+    # need a model call, and the answer is always the same, so don't guess.
     if is_delivery_date_missing(case):
         return missing_delivery_date_result(), []
 
     try:
-        client = get_client()
-        model_id = get_model_id()
+        client = get_client()      # may raise if the backend isn't configured
+        model_id = get_model_id()  # e.g. missing API key or model name
     except RuntimeError as exc:
         return unavailable_result(), [f"CONFIGURATION ERROR: {exc}", MANUAL_FALLBACK_MESSAGE]
 
@@ -263,6 +305,8 @@ def resolve_result(case, policy_text, model_fn=call_model):
 
 
 def load_offline_result(case_id, path=DEMO_OUTPUTS_PATH):
+    # Used by --offline-demo: replays a hand-authored example instead of
+    # calling any model, so the demo works with no backend configured at all.
     with open(path, "r") as f:
         data = json.load(f)
     entry = data.get(case_id)
@@ -282,6 +326,7 @@ def print_section(title, body):
 
 
 def print_supplied_facts(case):
+    # Shows the reviewer exactly what the model was given — nothing hidden.
     lines = [f"{key}: {value}" for key, value in case.items()]
     print_section("SUPPLIED FACTS", "\n".join(lines))
 
@@ -299,6 +344,8 @@ def print_draft_result(result, notes):
     ]
     body = "\n".join(lines)
     if notes:
+        # Extra context for the reviewer: why the model wasn't called, or
+        # what went wrong, plus the manual-fallback instructions if needed.
         body += "\n\n" + "\n".join(notes)
     print_section("DRAFT RESULT FOR HUMAN REVIEW", body)
 
@@ -309,17 +356,21 @@ def main(argv=None):
     cases = load_cases(CASES_PATH)
     case = cases[args.case]
 
+    # These two sections always print, regardless of mode or outcome below.
     print_supplied_facts(case)
     print_supplied_policy(policy_text)
 
     notes = []
 
     if args.simulate_timeout:
+        # Forces the same safe-unavailable state a real timeout would produce,
+        # without making any network call — useful for demos/tests.
         result = unavailable_result()
         notes.append("SIMULATED TIMEOUT: no model API call was made.")
         notes.append(MANUAL_FALLBACK_MESSAGE)
 
     elif args.offline_demo:
+        # Replays a prerecorded result instead of calling a real model.
         result = load_offline_result(args.case)
         notes.append(
             "OFFLINE DEMO: no model API was called. This is a prerecorded "
@@ -327,6 +378,8 @@ def main(argv=None):
         )
 
     else:
+        # The real path: deterministic short-circuit, or an actual model call,
+        # depending on whether delivery_date is present (see resolve_result).
         result, extra_notes = resolve_result(case, policy_text)
         notes.extend(extra_notes)
 
