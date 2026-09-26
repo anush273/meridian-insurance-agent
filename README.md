@@ -1,6 +1,6 @@
 # Meridian Retail Support-Draft Review Tool
 
-A small classroom demo. It drafts a customer support reply for one
+A small tool that drafts a customer support reply for one
 fictional case at a time, using only the facts in `cases.json` and the
 rules in `policy.md`, and prints it for a human reviewer. It supports two
 interchangeable model backends: a **local** model via
