@@ -1,24 +1,68 @@
 {
   "_meta": {
     "source": "prerecorded_synthetic",
-    "note": "Hand-authored example results for --offline-demo. No model API was used to produce these; they exist so the tool works without either backend configured."
+    "note": "Hand-authored example results for --offline-demo, matching the ten-field output contract in contractDefinitions.md. No model API was used to produce these; they exist so the tool works without either backend configured."
   },
   "C1": {
-    "draft_reply": "Thanks for letting us know about the broken zip on your jacket (order MR-1042), delivered on 2026-09-15. Since this was reported within two days of delivery, this case is being referred to our returns team for human review. This does not mean a refund has been approved -- a team member will confirm next steps with you directly.",
+    "case_id": "C1",
+    "case_summary": "Jacket zip broken on arrival; reported within two days of delivery.",
+    "known_facts": [
+      {"field": "order_id", "value": "MR-1042", "source_id": "order_record:MR-1042"},
+      {"field": "product", "value": "Jacket", "source_id": "order_record:MR-1042"},
+      {"field": "delivery_date", "value": "2026-09-15", "source_id": "order_record:MR-1042"},
+      {"field": "customer_question", "value": "The jacket arrived yesterday and the zip is broken. Can I return it?", "source_id": "support_queue:C1"},
+      {"field": "issue_status", "value": "open", "source_id": "issue_record:C1"},
+      {"field": "issue_details", "value": "Zip broken on arrival", "source_id": "issue_record:C1"}
+    ],
     "evidence_refs": ["P1", "P4"],
+    "evidence_links": [
+      {"claim": "Damage reported within two days of delivery can be referred for human return review.", "source_id": "policy_register:policy.md"}
+    ],
     "missing_information": [],
-    "review_status": "READY_FOR_HUMAN_REVIEW"
+    "conflicting_information": [],
+    "draft_reply": "Thanks for letting us know about the broken zip on your jacket (order MR-1042), delivered on 2026-09-15. Since this was reported within two days of delivery, this case is being referred to our returns team for human review. This does not mean a refund has been approved -- a team member will confirm next steps with you directly.",
+    "review_status": "READY_FOR_HUMAN_REVIEW",
+    "human_action_required": "A human agent must confirm eligibility and decide on next steps; this draft does not approve a refund."
   },
   "C2": {
-    "draft_reply": "Thanks for reaching out about the broken zip on your jacket (order MR-1088). To check whether this qualifies for our two-day return review, could you please tell us the delivery date? Once we have that, our team can review next steps.",
+    "case_id": "C2",
+    "case_summary": "Jacket zip broken; delivery date is not on file.",
+    "known_facts": [
+      {"field": "order_id", "value": "MR-1088", "source_id": "order_record:MR-1088"},
+      {"field": "product", "value": "Jacket", "source_id": "order_record:MR-1088"},
+      {"field": "customer_question", "value": "The jacket has a broken zip. Can I return it?", "source_id": "support_queue:C2"},
+      {"field": "issue_status", "value": "open", "source_id": "issue_record:C2"},
+      {"field": "issue_details", "value": "Zip broken; delivery date missing", "source_id": "issue_record:C2"}
+    ],
     "evidence_refs": ["P2", "P4"],
+    "evidence_links": [
+      {"claim": "The delivery date is required to apply the two-day rule; if missing, ask for it.", "source_id": "policy_register:policy.md"}
+    ],
     "missing_information": ["delivery_date"],
-    "review_status": "NEEDS_INFORMATION"
+    "conflicting_information": [],
+    "draft_reply": "Before Meridian Retail can assess whether this case falls within the two-day damage-reporting rule, please provide the delivery date. A human support agent will review the request once that information is available.",
+    "review_status": "NEEDS_INFORMATION",
+    "human_action_required": "A human agent must obtain the delivery date from the customer before this case can proceed."
   },
   "C3": {
-    "draft_reply": "Thanks for checking in on order MR-1126. This case is still open and your replacement request is still under review, so it has not been marked resolved yet. A team member will confirm the current status with you directly.",
-    "evidence_refs": ["P3", "P4"],
+    "case_id": "C3",
+    "case_summary": "Replacement request for shoes is still under review; not resolved.",
+    "known_facts": [
+      {"field": "order_id", "value": "MR-1126", "source_id": "order_record:MR-1126"},
+      {"field": "product", "value": "Shoes", "source_id": "order_record:MR-1126"},
+      {"field": "delivery_date", "value": "2026-09-10", "source_id": "order_record:MR-1126"},
+      {"field": "customer_question", "value": "Please confirm that my issue is resolved.", "source_id": "support_queue:C3"},
+      {"field": "issue_status", "value": "open", "source_id": "issue_record:C3"},
+      {"field": "issue_details", "value": "Replacement request is still under review", "source_id": "issue_record:C3"}
+    ],
+    "evidence_refs": ["P3"],
+    "evidence_links": [
+      {"claim": "If the issue record says open, the draft must not say the issue is resolved.", "source_id": "policy_register:policy.md"}
+    ],
     "missing_information": [],
-    "review_status": "READY_FOR_HUMAN_REVIEW"
+    "conflicting_information": [],
+    "draft_reply": "Thanks for checking in on order MR-1126. This case is still open and your replacement request is still under review, so it has not been marked resolved yet. A team member will confirm the current status with you directly.",
+    "review_status": "READY_FOR_HUMAN_REVIEW",
+    "human_action_required": "A human agent must confirm the current status directly with the customer."
   }
 }

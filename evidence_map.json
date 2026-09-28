@@ -1,0 +1,21 @@
+{
+  "_note": "Maps each source_id used by app.py to the classroom artefact and fields it stands for. contractDefinitions.md requires every source_id in a draft's known_facts, evidence_links and conflicting_information to resolve to an entry here.",
+  "C1": {
+    "support_queue:C1": "cases.json#C1 (customer_question)",
+    "order_record:MR-1042": "cases.json#C1 (order_id, product, delivery_date)",
+    "issue_record:C1": "cases.json#C1 (issue_status, issue_details)",
+    "policy_register:policy.md": "policy.md (P1-P4)"
+  },
+  "C2": {
+    "support_queue:C2": "cases.json#C2 (customer_question)",
+    "order_record:MR-1088": "cases.json#C2 (order_id, product, delivery_date)",
+    "issue_record:C2": "cases.json#C2 (issue_status, issue_details)",
+    "policy_register:policy.md": "policy.md (P1-P4)"
+  },
+  "C3": {
+    "support_queue:C3": "cases.json#C3 (customer_question)",
+    "order_record:MR-1126": "cases.json#C3 (order_id, product, delivery_date)",
+    "issue_record:C3": "cases.json#C3 (issue_status, issue_details)",
+    "policy_register:policy.md": "policy.md (P1-P4)"
+  }
+}
